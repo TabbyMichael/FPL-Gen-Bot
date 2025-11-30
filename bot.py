@@ -11,6 +11,7 @@ from services.transfer_engine import TransferEngine
 from services.lineup_selector import LineupSelector
 from services.ml_predictor import MLPredictor
 from services.performance_analyzer import PerformanceAnalyzer
+from services.health_check import HealthCheckService
 from utils.helpers import format_currency, calculate_squad_value
 
 # Configure logging
@@ -36,7 +37,17 @@ async def record_performance_data(db: Session, player_data: Dict[str, Any], game
             minutes_played=player_data.get('minutes', 0),
             goals_scored=player_data.get('goals_scored', 0),
             assists=player_data.get('assists', 0),
-            clean_sheet=player_data.get('clean_sheets', 0) > 0
+            clean_sheet=player_data.get('clean_sheets', 0) > 0,
+            yellow_cards=player_data.get('yellow_cards', 0),
+            red_cards=player_data.get('red_cards', 0),
+            saves=player_data.get('saves', 0),
+            bonus=player_data.get('bonus', 0),
+            bps=player_data.get('bps', 0),
+            form=player_data.get('form', 0.0),
+            points_per_game=player_data.get('points_per_game', 0.0),
+            selected_by_percent=player_data.get('selected_by_percent', 0.0),
+            transfers_in=player_data.get('transfers_in', 0),
+            transfers_out=player_data.get('transfers_out', 0)
         )
         db.add(performance_record)
         db.commit()
@@ -117,26 +128,42 @@ async def analyze_top_performers(api: FPLAPI, analyzer: PerformanceAnalyzer, pla
     except Exception as e:
         logger.error(f"Error analyzing top performers: {str(e)}")
 
-async def execute_transfers(api: FPLAPI, transfers: List[Dict[str, Any]], current_squad: List[Dict[str, Any]]):
-    """Execute transfers (placeholder for actual implementation)"""
+async def execute_transfers(api: FPLAPI, transfers: List[Dict[str, Any]], current_squad: List[Dict[str, Any]], gameweek: int):
+    """Execute transfers using the FPL API"""
     try:
         if not transfers:
             logger.info("No transfers to execute")
             return True
         
         logger.info("Executing transfers...")
+        
+        # Prepare transfers in the format expected by FPL API
+        fpl_transfers = []
         for transfer in transfers:
             out_player = transfer['out']
             in_player = transfer['in']
+            
+            # In a real implementation, we would get the actual purchase and selling prices
+            fpl_transfer = {
+                "element_in": in_player.get('id'),
+                "element_out": out_player.get('id'),
+                "purchase_price": in_player.get('now_cost', 0),
+                "selling_price": out_player.get('now_cost', 0)
+            }
+            fpl_transfers.append(fpl_transfer)
+            
             logger.info(f"Transferring out: {out_player.get('web_name')} -> Transferring in: {in_player.get('web_name')}")
             logger.info(f"  Reason: {transfer.get('reason', 'No reason provided')}")
-            
-            # In a real implementation, this would make actual API calls to execute transfers
-            # This requires proper authentication and is beyond the scope of this example
-            # For now, we'll just log what would be transferred
         
-        logger.info("Transfer execution completed (simulated)")
-        return True
+        # Execute transfers using the FPL API service
+        success = await api.execute_transfers(fpl_transfers)
+        
+        if success:
+            logger.info("Transfer execution completed successfully")
+        else:
+            logger.error("Transfer execution failed")
+            
+        return success
     except Exception as e:
         logger.error(f"Error executing transfers: {str(e)}")
         return False
@@ -145,24 +172,36 @@ async def run_weekly_process():
     """Run the weekly FPL process"""
     logger.info("Starting weekly FPL process")
     
+    # Initialize health check service
+    health_service = HealthCheckService()
+    
     # Get database session
     db_gen = get_db()
     db = next(db_gen)
     
     async with FPLAPI() as api:
-        # 1. Fetch bootstrap data
+        # 1. Run health checks first
+        logger.info("Running health checks...")
+        health_status = await health_service.run_health_checks()
+        logger.info(health_service.get_health_report())
+        
+        if not health_status.get('api_connectivity', False) or not health_status.get('database_connectivity', False):
+            logger.error("Critical health checks failed, aborting process")
+            return False
+        
+        # 2. Fetch bootstrap data
         logger.info("Fetching FPL data...")
         bootstrap_data = await api.get_bootstrap_data()
         if not bootstrap_data:
             logger.error("Failed to fetch bootstrap data")
             return False
         
-        # 2. Get player data
+        # 3. Get player data
         players = bootstrap_data.get('elements', [])
         teams = bootstrap_data.get('teams', [])
         events = bootstrap_data.get('events', [])
         
-        # 3. Find current gameweek
+        # 4. Find current gameweek
         current_gw = None
         for event in events:
             if event.get('is_current'):
@@ -183,7 +222,7 @@ async def run_weekly_process():
         gameweek_id = current_gw.get('id')
         logger.info(f"Processing gameweek {gameweek_id}")
         
-        # 4. Get current squad
+        # 5. Get current squad
         logger.info("Fetching current squad...")
         current_squad, budget = await get_current_squad(api, gameweek_id)
         
@@ -225,30 +264,44 @@ async def run_weekly_process():
         else:
             logger.warning("No squad data available")
         
-        # 5. Initialize engines with database connection
+        # 6. Initialize engines with database connection
         transfer_engine = TransferEngine(db)
         lineup_selector = LineupSelector(db)
         performance_analyzer = PerformanceAnalyzer(api)
         
-        # Record performance data for ML training (would normally be from previous gameweeks)
-        for player in players[:20]:  # More sample data for demonstration
+        # 7. Record performance data for ML training (would normally be from previous gameweeks)
+        logger.info("Recording performance data for ML training...")
+        recorded_count = 0
+        for player in players[:50]:  # Sample data for demonstration
             await record_performance_data(db, player, gameweek_id - 1)
+            recorded_count += 1
+            if recorded_count % 10 == 0:
+                logger.debug(f"Recorded {recorded_count}/50 players")
+        logger.info(f"Recorded performance data for {recorded_count} players")
         
-        # Retrain ML model with new data
+        # 8. Retrain ML model with new data
+        logger.info("Training ML model...")
         ml_predictor = MLPredictor()
-        await asyncio.get_event_loop().run_in_executor(None, lambda: ml_predictor.train_model(db))
+        training_success = await asyncio.get_event_loop().run_in_executor(None, lambda: ml_predictor.train_model(db))
         
-        # Show feature importance if model is trained
-        if ml_predictor.is_trained:
-            feature_importance = ml_predictor.get_feature_importance()
-            logger.info("ML Model Feature Importance:")
-            for feature, importance in list(feature_importance.items())[:5]:  # Top 5 features
-                logger.info(f"  {feature}: {importance:.3f}")
+        if training_success:
+            logger.info("ML model training completed")
+            # Show feature importance if model is trained
+            if ml_predictor.is_trained:
+                feature_importance = ml_predictor.get_feature_importance()
+                if feature_importance:
+                    logger.info("ML Model Feature Importance:")
+                    for feature, importance in list(feature_importance.items())[:5]:  # Top 5 features
+                        logger.info(f"  {feature}: {importance:.3f}")
+                else:
+                    logger.warning("ML model trained but feature importance is empty")
+        else:
+            logger.warning("ML model training failed or insufficient data")
         
-        # 6. Analyze top performers
+        # 9. Analyze top performers
         await analyze_top_performers(api, performance_analyzer, players)
         
-        # 7. Identify transfer targets with sophisticated analysis
+        # 10. Identify transfer targets with sophisticated analysis
         logger.info("Analyzing transfer options with fixture difficulty and injury checks...")
         transfer_targets = await transfer_engine.identify_transfer_targets(
             current_squad, players, budget, api
@@ -273,10 +326,10 @@ async def run_weekly_process():
                 'cost': 0  # Would be actual transfer cost
             })
         
-        # 8. Execute transfers (simulated)
-        await execute_transfers(api, transfer_targets, current_squad)
+        # 11. Execute transfers
+        await execute_transfers(api, transfer_targets, current_squad, gameweek_id)
         
-        # 9. Select lineup
+        # 12. Select lineup
         logger.info("Selecting optimal lineup...")
         lineup = lineup_selector.select_lineup(current_squad)
         captain = lineup_selector.select_captain(lineup)
@@ -293,12 +346,12 @@ async def run_weekly_process():
         else:
             logger.warning("No captain selected")
         
-        # 10. Log squad summary
+        # 13. Log squad summary
         if current_squad:
             squad_value = calculate_squad_value(current_squad)
             logger.info(f"Squad value: {format_currency(squad_value)}")
         
-        # Show upcoming fixture difficulties
+        # 14. Show upcoming fixture difficulties
         logger.info("Upcoming fixture difficulties:")
         current_teams = set(player.get('team') for player in current_squad)
         for team in teams:
@@ -306,7 +359,7 @@ async def run_weekly_process():
                 difficulty = await api.get_fixture_difficulty(team.get('id'), gameweek_id)
                 logger.info(f"  {team.get('name')}: Difficulty {difficulty}/5")
         
-        # Check for injured players in squad
+        # 15. Check for injured players in squad
         injured_players = [player for player in current_squad if not transfer_engine.is_player_available(player)]
         if injured_players:
             logger.warning(f"Found {len(injured_players)} potentially unavailable players in squad:")

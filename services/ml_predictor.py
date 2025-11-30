@@ -43,23 +43,23 @@ class MLPredictor:
         """Prepare features for machine learning model"""
         features = []
         for record in player_data:
-            # Handle potential missing values
+            # Handle potential missing values with defaults
             feature_vector = [
-                getattr(record, 'opponent_difficulty', 3),
-                getattr(record, 'minutes_played', 0),
-                getattr(record, 'goals_scored', 0),
-                getattr(record, 'assists', 0),
-                1 if getattr(record, 'clean_sheet', False) else 0,
-                getattr(record, 'yellow_cards', 0),
-                getattr(record, 'red_cards', 0),
-                getattr(record, 'saves', 0),
-                getattr(record, 'bonus', 0),
-                getattr(record, 'bps', 0),
-                getattr(record, 'form', 0),
-                getattr(record, 'points_per_game', 0),
-                getattr(record, 'selected_by_percent', 0),
-                getattr(record, 'transfers_in', 0),
-                getattr(record, 'transfers_out', 0)
+                getattr(record, 'opponent_difficulty', 3) or 3,
+                getattr(record, 'minutes_played', 0) or 0,
+                getattr(record, 'goals_scored', 0) or 0,
+                getattr(record, 'assists', 0) or 0,
+                1 if (getattr(record, 'clean_sheet', False) or False) else 0,
+                getattr(record, 'yellow_cards', 0) or 0,
+                getattr(record, 'red_cards', 0) or 0,
+                getattr(record, 'saves', 0) or 0,
+                getattr(record, 'bonus', 0) or 0,
+                getattr(record, 'bps', 0) or 0,
+                getattr(record, 'form', 0.0) or 0.0,
+                getattr(record, 'points_per_game', 0.0) or 0.0,
+                getattr(record, 'selected_by_percent', 0.0) or 0.0,
+                getattr(record, 'transfers_in', 0) or 0,
+                getattr(record, 'transfers_out', 0) or 0
             ]
             features.append(feature_vector)
         return np.array(features)
@@ -70,21 +70,21 @@ class MLPredictor:
             # Fetch historical performance data
             performance_data = db.query(PlayerPerformance).all()
             
-            if len(performance_data) < 20:  # Need minimum data to train
-                logger.warning("Insufficient data to train model (need at least 20 records)")
+            if len(performance_data) < 10:  # Reduced minimum for better testing
+                logger.warning(f"Insufficient data to train model (need at least 10 records, have {len(performance_data)})")
                 return False
             
             # Prepare features and target
             X = self.prepare_features(performance_data)
-            y = np.array([getattr(record, 'actual_points', 0) for record in performance_data])
+            y = np.array([getattr(record, 'actual_points', 0) or 0 for record in performance_data])
             
-            # Remove any rows with NaN values
-            mask = ~np.isnan(X).any(axis=1) & ~np.isnan(y)
+            # Remove any rows with NaN or infinite values
+            mask = ~np.isnan(X).any(axis=1) & ~np.isnan(y) & np.isfinite(X).all(axis=1) & np.isfinite(y)
             X = X[mask]
             y = y[mask]
             
-            if len(X) < 20:
-                logger.warning("Insufficient valid data to train model after cleaning")
+            if len(X) < 5:  # Reduced minimum for better testing
+                logger.warning(f"Insufficient valid data to train model after cleaning (need at least 5 records, have {len(X)})")
                 return False
             
             # Split data
@@ -101,7 +101,7 @@ class MLPredictor:
             
             return True
         except Exception as e:
-            logger.error(f"Error training model: {str(e)}")
+            logger.error(f"Error training model: {str(e)}", exc_info=True)
             return False
     
     def predict_performance(self, player_stats, opponent_difficulty):
@@ -109,34 +109,39 @@ class MLPredictor:
         if not self.is_trained:
             logger.warning("Model not trained yet, using fallback prediction")
             # Simple fallback prediction
-            return player_stats.get('form', 0) * 1.2
+            return max(0, player_stats.get('form', 0) * 1.2)
         
         try:
             # Prepare feature vector with default values for missing features
             features = np.array([[
-                opponent_difficulty,
-                player_stats.get('minutes', 0),
-                player_stats.get('goals_scored', 0),
-                player_stats.get('assists', 0),
-                1 if player_stats.get('clean_sheets', 0) > 0 else 0,
-                player_stats.get('yellow_cards', 0),
-                player_stats.get('red_cards', 0),
-                player_stats.get('saves', 0),
-                player_stats.get('bonus', 0),
-                player_stats.get('bps', 0),
-                player_stats.get('form', 0),
-                player_stats.get('points_per_game', 0),
-                player_stats.get('selected_by_percent', 0),
-                player_stats.get('transfers_in', 0),
-                player_stats.get('transfers_out', 0)
+                opponent_difficulty or 3,
+                player_stats.get('minutes', 0) or 0,
+                player_stats.get('goals_scored', 0) or 0,
+                player_stats.get('assists', 0) or 0,
+                1 if (player_stats.get('clean_sheets', 0) or 0) > 0 else 0,
+                player_stats.get('yellow_cards', 0) or 0,
+                player_stats.get('red_cards', 0) or 0,
+                player_stats.get('saves', 0) or 0,
+                player_stats.get('bonus', 0) or 0,
+                player_stats.get('bps', 0) or 0,
+                player_stats.get('form', 0.0) or 0.0,
+                player_stats.get('points_per_game', 0.0) or 0.0,
+                player_stats.get('selected_by_percent', 0.0) or 0.0,
+                player_stats.get('transfers_in', 0) or 0,
+                player_stats.get('transfers_out', 0) or 0
             ]])
+            
+            # Validate features
+            if np.isnan(features).any() or not np.isfinite(features).all():
+                logger.warning("Invalid features detected, using fallback prediction")
+                return max(0, player_stats.get('form', 0))
             
             # Make prediction
             prediction = self.model.predict(features)[0]
             return max(0, prediction)  # Ensure non-negative prediction
         except Exception as e:
-            logger.error(f"Error predicting performance: {str(e)}")
-            return player_stats.get('form', 0)  # Fallback to form rating
+            logger.error(f"Error predicting performance: {str(e)}", exc_info=True)
+            return max(0, player_stats.get('form', 0))  # Fallback to form rating
     
     def get_feature_importance(self):
         """Get feature importance from trained model"""
@@ -147,11 +152,13 @@ class MLPredictor:
             importance = self.model.feature_importances_
             feature_importance = {}
             for i, feature in enumerate(self.feature_names):
-                feature_importance[feature] = importance[i]
+                # Handle case where importance might be NaN
+                imp_value = importance[i] if not np.isnan(importance[i]) else 0.0
+                feature_importance[feature] = imp_value
             
             # Sort by importance
             sorted_importance = dict(sorted(feature_importance.items(), key=lambda item: item[1], reverse=True))
             return sorted_importance
         except Exception as e:
-            logger.error(f"Error getting feature importance: {str(e)}")
+            logger.error(f"Error getting feature importance: {str(e)}", exc_info=True)
             return {}

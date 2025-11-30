@@ -29,6 +29,16 @@ class PlayerPerformance(Base):
     goals_scored = Column(Integer)
     assists = Column(Integer)
     clean_sheet = Column(Boolean)
+    yellow_cards = Column(Integer)
+    red_cards = Column(Integer)
+    saves = Column(Integer)
+    bonus = Column(Integer)
+    bps = Column(Integer)
+    form = Column(Float)
+    points_per_game = Column(Float)
+    selected_by_percent = Column(Float)
+    transfers_in = Column(Integer)
+    transfers_out = Column(Integer)
     created_at = Column(DateTime)
 
 class PlayerPrediction(Base):

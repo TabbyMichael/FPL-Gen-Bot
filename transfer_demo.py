@@ -20,16 +20,20 @@ class FPLTransferExecutor:
         self.team_id = TEAM_ID
     
     async def authenticate(self):
-        """Authenticate with FPL (placeholder)"""
+        """Authenticate with FPL"""
         logger.info("Authenticating with FPL...")
-        # In a real implementation, this would handle authentication
-        # For Google Sign-In accounts, this would use session cookies
-        logger.info("Authentication simulated - in real implementation, this would use session cookies")
-        return True
+        # Delegate to the FPL API service for authentication
+        auth_result = await self.api._authenticate()
+        if auth_result:
+            logger.info("Authentication successful")
+        else:
+            logger.error("Authentication failed")
+        return auth_result
     
     async def get_current_transfers_made(self, gameweek: int) -> int:
         """Get number of transfers already made this gameweek"""
-        # Placeholder - in real implementation, this would fetch from API
+        # In a real implementation, this would fetch from API
+        # For now, we'll return 0 as a placeholder
         return 0
     
     async def calculate_transfer_cost(self, transfers_made: int, new_transfers: int) -> int:
@@ -51,12 +55,26 @@ class FPLTransferExecutor:
             cost = await self.calculate_transfer_cost(transfers_made, 1)
             logger.info(f"Transfer cost: £{cost}m")
             
-            # In a real implementation, this would make the actual API call:
-            # POST to https://fantasy.premierleague.com/api/transfers/
-            # With proper authentication headers and transfer payload
+            # Prepare transfer data in the format expected by FPL API
+            transfers = [
+                {
+                    "element_in": player_in_id,
+                    "element_out": player_out_id,
+                    "purchase_price": 0,  # Would need to get actual prices
+                    "selling_price": 0    # Would need to get actual prices
+                }
+            ]
             
-            logger.info("Transfer executed successfully (simulated)")
-            return True
+            # Execute the transfer using the FPL API service
+            result = await self.api.execute_transfers(transfers)
+            
+            if result:
+                logger.info("Transfer executed successfully")
+                return True
+            else:
+                logger.error("Failed to execute transfer")
+                return False
+                
         except Exception as e:
             logger.error(f"Error executing transfer: {str(e)}")
             return False

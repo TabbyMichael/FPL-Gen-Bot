@@ -47,12 +47,22 @@ class TransferEngine:
             return 0
     
     def is_player_available(self, player: Dict[str, Any]) -> bool:
-        """Check if player is available (not injured or suspended) - simplified version"""
+        """Check if player is available (not injured or suspended) - improved version"""
         try:
-            status = player.get('status', 'a')
+            # Get status with proper None handling
+            status = player.get('status')
+            if status is None:
+                status = 'a'  # Default to available if status is missing
             
             # 'a' = available, 'i' = injured, 's' = suspended, 'u' = unavailable
             if status != 'a':
+                logger.debug(f"Player {player.get('web_name', 'Unknown')} is not available (status: {status})")
+                return False
+            
+            # Check chance of playing next round
+            chance_next = player.get('chance_of_playing_next_round')
+            if chance_next is not None and chance_next < 75:  # Less than 75% chance
+                logger.debug(f"Player {player.get('web_name', 'Unknown')} has low chance of playing ({chance_next}%)")
                 return False
                 
             return True
@@ -81,6 +91,8 @@ class TransferEngine:
                                 api: Optional[FPLAPI] = None) -> List[Dict]:
         """Identify potential transfer targets with sophisticated analysis"""
         try:
+            logger.info("Starting transfer target identification...")
+            
             # Get current gameweek for fixture analysis
             current_gw = 13  # Default, would normally get from API
             if api:
@@ -93,8 +105,15 @@ class TransferEngine:
                             break
             
             # Calculate value and expected points for each player
+            logger.info(f"Analyzing {len(available_players)} available players...")
             player_values = []
+            processed_count = 0
+            
             for player in available_players:
+                processed_count += 1
+                if processed_count % 100 == 0:
+                    logger.debug(f"Processed {processed_count}/{len(available_players)} players")
+                
                 # Skip injured/suspended players
                 if not self.is_player_available(player):
                     continue
@@ -115,10 +134,13 @@ class TransferEngine:
                     'fixture_difficulty': fixture_difficulty
                 })
             
+            logger.info(f"Found {len(player_values)} available players after filtering")
+            
             # Sort by value
             player_values.sort(key=lambda x: x['value'], reverse=True)
             
             # Find weakest players in current squad
+            logger.info(f"Analyzing {len(current_squad)} squad players...")
             squad_analysis = []
             for player in current_squad:
                 team_id = player.get('team', 0)
@@ -173,9 +195,10 @@ class TransferEngine:
             
             # Sort by gain
             transfers.sort(key=lambda x: x['gain'], reverse=True)
+            logger.info(f"Identified {len(transfers)} potential transfers")
             return transfers[:2]  # Return top 2 transfers
         except Exception as e:
-            logger.error(f"Error identifying transfer targets: {str(e)}")
+            logger.error(f"Error identifying transfer targets: {str(e)}", exc_info=True)
             return []
     
     def record_transfer(self, transfer_data: Dict):
