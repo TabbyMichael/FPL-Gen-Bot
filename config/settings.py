@@ -4,9 +4,11 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# FPL Credentials
+# FPL Credentials - Support both traditional and session-based auth
 FPL_USERNAME = os.getenv('FPL_USERNAME')
 FPL_PASSWORD = os.getenv('FPL_PASSWORD')
+SESSION_ID = os.getenv('SESSION_ID')
+CSRF_TOKEN = os.getenv('CSRF_TOKEN')
 TEAM_ID = os.getenv('TEAM_ID')
 
 # API Settings

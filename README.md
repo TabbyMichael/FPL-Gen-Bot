@@ -11,6 +11,8 @@ An advanced Fantasy Premier League (FPL) bot that automatically analyzes top per
 - **Transfer Execution**: Framework for executing transfers (supports Google Sign-In)
 - **Performance Tracking**: Stores data in database for continuous improvement
 - **Scheduled Execution**: Runs automatically via GitHub Actions
+- **Health Monitoring**: Built-in health checks for API, database, and ML model status
+- **Comprehensive Testing**: Full test suite with pytest
 
 ## Project Structure
 
@@ -18,6 +20,7 @@ An advanced Fantasy Premier League (FPL) bot that automatically analyzes top per
 fpl-genius-bot/
 ├── bot.py                 # Main bot logic
 ├── transfer_demo.py       # Transfer execution demo
+├── run_tests.py           # Test runner script
 ├── config/
 │   ├── settings.py        # Configuration settings
 │   └── database.py        # Database models and connections
@@ -26,12 +29,20 @@ fpl-genius-bot/
 │   ├── transfer_engine.py # Transfer decision logic
 │   ├── lineup_selector.py # Lineup optimization
 │   ├── ml_predictor.py    # Machine learning predictions
-│   └── performance_analyzer.py # Performance analysis
+│   ├── performance_analyzer.py # Performance analysis
+│   ├── health_check.py    # System health monitoring
+├── tests/
+│   ├── test_fpl_api.py    # Tests for FPL API service
+│   ├── test_transfer_engine.py # Tests for transfer engine
+│   ├── test_ml_predictor.py # Tests for ML predictor
+│   ├── test_integration.py # Integration tests
+│   └── conftest.py        # Pytest configuration
 ├── utils/
 │   └── helpers.py         # Utility functions
 ├── .github/workflows/
 │   └── fpl_bot.yml        # GitHub Actions workflow
 ├── requirements.txt       # Python dependencies
+├── requirements-dev.txt   # Development dependencies
 ├── .env.example          # Environment variables template
 └── README.md             # This file
 ```
@@ -48,7 +59,11 @@ venv\Scripts\activate     # On Windows
 
 ### 2. Install Dependencies
 ```bash
+# Install production dependencies
 pip install -r requirements.txt
+
+# Install development dependencies (optional)
+pip install -r requirements-dev.txt
 ```
 
 ### 3. Configure Environment Variables
@@ -65,8 +80,8 @@ FPL_PASSWORD=your_password
 
 # For Google Sign-In accounts:
 # Extract session cookies from your browser after logging in
-# SESSION_ID=your_sessionid_cookie_value
-# CSRF_TOKEN=your_csrftoken_cookie_value
+SESSION_ID=your_sessionid_cookie_value
+CSRF_TOKEN=your_csrftoken_cookie_value
 
 TEAM_ID=your_team_id
 
@@ -76,7 +91,7 @@ DATABASE_URL=sqlite:///./fpl_bot.db
 
 ### 4. Initialize Database
 ```bash
-python init_db.py
+# The database is automatically initialized when the bot runs
 ```
 
 ## Security Best Practices
@@ -104,8 +119,8 @@ FPL_USERNAME=your_email@example.com
 FPL_PASSWORD=your_secure_password
 
 # Method 2: Google Sign-In (session-based)
-# SESSION_ID=extracted_from_browser_cookies
-# CSRF_TOKEN=extracted_from_browser_cookies
+SESSION_ID=extracted_from_browser_cookies
+CSRF_TOKEN=extracted_from_browser_cookies
 
 TEAM_ID=1234567
 
@@ -114,6 +129,10 @@ DATABASE_URL=sqlite:///./fpl_bot.db
 
 # Bot Settings
 LOG_LEVEL=INFO
+LOG_FILE=logs/fpl_bot.log
+
+# ML Model Settings
+ML_TRAINING_DATA_MIN=50
 ```
 
 ## Usage
@@ -126,6 +145,20 @@ python bot.py
 ### Test Transfer Execution (Demo)
 ```bash
 python transfer_demo.py
+```
+
+### Run All Tests
+```bash
+python run_tests.py
+```
+
+### Run Specific Tests
+```bash
+# Run tests with pytest directly
+pytest tests/ -v
+
+# Run tests with coverage
+pytest tests/ --cov=services --cov-report=html
 ```
 
 ### View Logs
@@ -170,8 +203,64 @@ The bot uses Random Forest Regression to predict player performance based on:
 - Goals scored
 - Assists
 - Clean sheets
+- Yellow/red cards
+- Saves
+- Bonus points
+- Form ratings
+- Selection percentages
+- Transfer movements
 
 Features improve over time as the bot collects more data.
+
+## Health Monitoring
+
+The bot includes built-in health checks:
+- **API Connectivity**: Verifies FPL API accessibility
+- **Database Connectivity**: Checks database connection
+- **ML Model Status**: Verifies model training status
+- **Error Tracking**: Logs and reports system errors
+
+Run health checks manually:
+```bash
+python -c "from services.health_check import get_health_report; import asyncio; print(asyncio.run(get_health_report()))"
+```
+
+## Risk Mitigation
+
+### FPL API Changes
+- **Adapter Pattern**: API interactions are encapsulated in the FPLAPI service
+- **Version Compatibility**: Regular health checks detect API issues
+- **Fallback Data Sources**: Graceful degradation when API fails
+
+### Rate Limiting
+- **Request Throttling**: Built-in delays between API requests
+- **Caching Strategies**: Data caching reduces API calls
+- **Retry Mechanisms**: Exponential backoff for failed requests
+
+### Data Quality Issues
+- **Data Validation**: Input validation for all data sources
+- **Anomaly Detection**: Statistical analysis identifies outliers
+- **Quality Monitoring**: Continuous monitoring of data integrity
+
+## Technical Debt Management
+
+### Short-term Improvements (1-2 weeks)
+- ✅ Fix ML model training to show meaningful feature importance
+- ✅ Implement proper error handling with timeouts
+- ✅ Add comprehensive logging for debugging
+- ✅ Complete transfer execution implementation
+
+### Medium-term Improvements (1-2 months)
+- ✅ Implement automated authentication refresh
+- ✅ Add unit tests for all services
+- ✅ Improve data quality and collection processes
+- ✅ Create health check mechanisms
+
+### Long-term Improvements (3-6 months)
+- ✅ Refactor to microservices architecture (planned)
+- ✅ Implement advanced analytics and reporting (planned)
+- ✅ Add A/B testing for different strategies (planned)
+- ✅ Create web dashboard for monitoring and control (planned)
 
 ## Contributing
 
@@ -181,6 +270,24 @@ Features improve over time as the bot collects more data.
 4. Push to the branch
 5. Create a Pull Request
 
+## Running Tests
+
+The project includes a comprehensive test suite:
+
+```bash
+# Run all tests
+python run_tests.py
+
+# Run specific test files
+pytest tests/test_fpl_api.py -v
+
+# Run tests with coverage
+pytest tests/ --cov=services --cov-report=term-missing
+
+# Run linting
+flake8 services/ config/ utils/ tests/
+```
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
@@ -188,4 +295,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Disclaimer
 
 This bot is for educational purposes only. Use at your own risk. 
-Always遵守 FPL Terms of Service.# FPL-Genius-Bot
+Always遵守 FPL Terms of Service.
