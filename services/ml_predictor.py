@@ -112,6 +112,21 @@ class MLPredictor:
             return max(0, player_stats.get('form', 0) * 1.2)
         
         try:
+            # Data validation and cleaning
+            numeric_features = [
+                'minutes', 'goals_scored', 'assists', 'clean_sheets',
+                'yellow_cards', 'red_cards', 'saves', 'bonus', 'bps',
+                'form', 'points_per_game', 'selected_by_percent',
+                'transfers_in', 'transfers_out'
+            ]
+            for feature in numeric_features:
+                try:
+                    player_stats[feature] = pd.to_numeric(player_stats.get(feature, 0), errors='coerce')
+                    if pd.isna(player_stats[feature]):
+                        player_stats[feature] = 0
+                except (ValueError, TypeError):
+                    player_stats[feature] = 0
+
             # Prepare feature vector with default values for missing features
             features = np.array([[
                 opponent_difficulty or 3,
@@ -129,7 +144,7 @@ class MLPredictor:
                 player_stats.get('selected_by_percent', 0.0) or 0.0,
                 player_stats.get('transfers_in', 0) or 0,
                 player_stats.get('transfers_out', 0) or 0
-            ]])
+            ]], dtype=np.float64)  # Ensure dtype is float
             
             # Validate features
             if np.isnan(features).any() or not np.isfinite(features).all():
