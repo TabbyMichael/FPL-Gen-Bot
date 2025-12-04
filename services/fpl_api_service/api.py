@@ -5,8 +5,9 @@ import time
 from typing import Optional
 from playwright.async_api import async_playwright
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from config.settings import FPL_BASE_URL
-from utils.security import log_api_call, log_authentication_attempt
+
+# These will be replaced by environment variables or a config service
+FPL_BASE_URL = "https://fantasy.premierleague.com/api"
 
 logger = logging.getLogger(__name__)
 
@@ -86,14 +87,12 @@ class FPLAPI:
         if method.upper() == 'GET' and cacheable:
             is_cached, cached_response = self._is_cached(url)
             if is_cached:
-                log_api_call(url, method, 200)  # Log cached response as 200
                 return cached_response
 
         # Determine which session to use
         if authenticated:
             if not await self._ensure_authenticated():
                 logger.error("Authentication required but failed.")
-                log_api_call(url, method, 401)
                 return None
             session_to_use = self.authenticated_session
         else:
@@ -101,12 +100,10 @@ class FPLAPI:
 
         if not session_to_use:
             logger.error("No active session available.")
-            log_api_call(url, method, 0)
             return None
 
         try:
             async with session_to_use.request(method, url, **kwargs) as response:
-                log_api_call(url, method, response.status)
 
                 if response.status == 200:
                     result = await response.json()
@@ -129,14 +126,12 @@ class FPLAPI:
                     return None
         except (asyncio.TimeoutError, aiohttp.ClientConnectorError) as e:
             logger.warning(f"Connection error for {url}: {e}")
-            log_api_call(url, method, 0)
             raise  # Re-raise to be caught by tenacity for retry
         except RetryableAPIError:
             # Let tenacity handle this specific error for retries
             raise
         except Exception as e:
             logger.error(f"Unexpected error for {url}: {e}")
-            log_api_call(url, method, 0)
             return None
     
     async def _is_session_expired(self) -> bool:
@@ -183,7 +178,6 @@ class FPLAPI:
                     }
                 )
                 self.last_auth_time = time.time()
-                log_authentication_attempt(True, "session")
                 return True
             
             # Fallback to traditional username/password authentication
@@ -220,19 +214,15 @@ class FPLAPI:
                         }
                     )
                     self.last_auth_time = time.time()
-                    log_authentication_attempt(True, "traditional")
                     return True
                 else:
                     logger.error("Failed to retrieve session cookies")
-                    log_authentication_attempt(False, "traditional")
                     return False
             
             logger.warning("No authentication credentials provided")
-            log_authentication_attempt(False, "none")
             return False
         except Exception as e:
             logger.error(f"Authentication failed: {str(e)}")
-            log_authentication_attempt(False, "error")
             return False
     
     async def _ensure_authenticated(self) -> bool:
@@ -427,15 +417,6 @@ class FPLAPI:
                             if response.status == 200:
                                 result = await response.json()
                                 logger.info(f"Transfers executed successfully: {result}")
-                                # Log transfer execution
-                                for transfer in transfers:
-                                    # Import here to avoid circular imports
-                                    from utils.security import log_transfer_execution
-                                    log_transfer_execution(
-                                        transfer.get('element_out', 0),
-                                        transfer.get('element_in', 0),
-                                        True
-                                    )
                                 return True
                             elif response.status == 401:  # Unauthorized
                                 logger.warning("Unauthorized during transfer execution, re-authenticating...")
@@ -444,71 +425,26 @@ class FPLAPI:
                                         continue  # Retry after re-authentication
                                 else:
                                     logger.error("Failed to re-authenticate for transfer execution")
-                                    # Log failed transfer execution
-                                    for transfer in transfers:
-                                        # Import here to avoid circular imports
-                                        from utils.security import log_transfer_execution
-                                        log_transfer_execution(
-                                            transfer.get('element_out', 0),
-                                            transfer.get('element_in', 0),
-                                            False
-                                        )
                                     return False
                             else:
                                 error_text = await response.text()
                                 logger.error(f"Failed to execute transfers. Status: {response.status}, Error: {error_text}")
-                                # Log failed transfer execution
-                                for transfer in transfers:
-                                    # Import here to avoid circular imports
-                                    from utils.security import log_transfer_execution
-                                    log_transfer_execution(
-                                        transfer.get('element_out', 0),
-                                        transfer.get('element_in', 0),
-                                        False
-                                    )
                                 if attempt < max_retries - 1:
                                     await asyncio.sleep(2 ** attempt)  # Exponential backoff
                                     continue
                                 return False
                     else:
                         logger.error("No authenticated session available for transfer execution")
-                        # Log failed transfer execution
-                        for transfer in transfers:
-                            # Import here to avoid circular imports
-                            from utils.security import log_transfer_execution
-                            log_transfer_execution(
-                                transfer.get('element_out', 0),
-                                transfer.get('element_in', 0),
-                                False
-                            )
                         return False
                 except Exception as e:
                     logger.error(f"Error executing transfers (attempt {attempt + 1}): {str(e)}")
                     if attempt < max_retries - 1:
                         await asyncio.sleep(2 ** attempt)  # Exponential backoff
                         continue
-                    # Log failed transfer execution due to exception
-                    for transfer in transfers:
-                        # Import here to avoid circular imports
-                        from utils.security import log_transfer_execution
-                        log_transfer_execution(
-                            transfer.get('element_out', 0),
-                            transfer.get('element_in', 0),
-                            False
-                        )
                     return False
             
             return False  # All retries exhausted
                 
         except Exception as e:
             logger.error(f"Error executing transfers: {str(e)}")
-            # Log failed transfer execution due to exception
-            for transfer in transfers:
-                # Import here to avoid circular imports
-                from utils.security import log_transfer_execution
-                log_transfer_execution(
-                    transfer.get('element_out', 0),
-                    transfer.get('element_in', 0),
-                    False
-                )
             return False

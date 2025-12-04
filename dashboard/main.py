@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
@@ -17,13 +18,27 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="FPL Bot Dashboard", version="1.0.0")
 
 # Add CORS middleware
+origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Global error handling middleware
+@app.middleware("http")
+async def catch_exceptions_middleware(request, call_next):
+    try:
+        return await call_next(request)
+    except Exception as e:
+        logger.error(f"Unhandled exception: {str(e)}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal Server Error", "message": str(e)}
+        )
 
 # Cache for player data
 _player_cache = {}
@@ -103,149 +118,172 @@ async def get_team_info(db: Session = Depends(get_database)):
 @app.get("/performance/history")
 async def get_performance_history(limit: int = 50, db: Session = Depends(get_database)):
     """Get player performance history with player names"""
-    try:
-        performances = db.query(PlayerPerformance).order_by(
-            PlayerPerformance.created_at.desc()
-        ).limit(limit).all()
-        
-        # Get player names for all unique player IDs
-        player_ids = []
-        for p in performances:
-            player_id = int(p.player_id) if hasattr(p, 'player_id') else 0
-            if player_id not in player_ids:
-                player_ids.append(player_id)
-        
-        player_names = {}
-        for player_id in player_ids:
-            player_names[player_id] = await get_player_name(player_id)
-        
-        result = []
-        for p in performances:
-            result.append({
-                "id": int(p.id) if hasattr(p, 'id') else 0,
-                "player_id": int(p.player_id) if hasattr(p, 'player_id') else 0,
-                "player_name": player_names.get(int(p.player_id) if hasattr(p, 'player_id') else 0, f'Player {p.player_id if hasattr(p, "player_id") else 0}'),
-                "gameweek": int(p.gameweek) if hasattr(p, 'gameweek') and p.gameweek is not None else 0,
-                "expected_points": float(p.expected_points) if hasattr(p, 'expected_points') and p.expected_points is not None else 0.0,
-                "actual_points": float(p.actual_points) if hasattr(p, 'actual_points') and p.actual_points is not None else 0.0,
-                "opponent_difficulty": int(p.opponent_difficulty) if hasattr(p, 'opponent_difficulty') and p.opponent_difficulty is not None else 3,
-                "form": float(p.form) if hasattr(p, 'form') and p.form is not None else 0.0,
-                "points_per_game": float(p.points_per_game) if hasattr(p, 'points_per_game') and p.points_per_game is not None else 0.0,
-                "created_at": p.created_at.isoformat() if hasattr(p, 'created_at') and p.created_at is not None else None
-            })
-        
-        return result
-    except Exception as e:
-        logger.error(f"Error fetching performance history: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to fetch performance history")
+    performances = db.query(PlayerPerformance).order_by(
+        PlayerPerformance.created_at.desc()
+    ).limit(limit).all()
+    
+    # Get player names for all unique player IDs
+    player_ids = []
+    for p in performances:
+        player_id = int(p.player_id) if hasattr(p, 'player_id') else 0
+        if player_id not in player_ids:
+            player_ids.append(player_id)
+    
+    player_names = {}
+    for player_id in player_ids:
+        player_names[player_id] = await get_player_name(player_id)
+    
+    result = []
+    for p in performances:
+        result.append({
+            "id": int(p.id) if hasattr(p, 'id') else 0,
+            "player_id": int(p.player_id) if hasattr(p, 'player_id') else 0,
+            "player_name": player_names.get(int(p.player_id) if hasattr(p, 'player_id') else 0, f'Player {p.player_id if hasattr(p, "player_id") else 0}'),
+            "gameweek": int(p.gameweek) if hasattr(p, 'gameweek') and p.gameweek is not None else 0,
+            "expected_points": float(p.expected_points) if hasattr(p, 'expected_points') and p.expected_points is not None else 0.0,
+            "actual_points": float(p.actual_points) if hasattr(p, 'actual_points') and p.actual_points is not None else 0.0,
+            "opponent_difficulty": int(p.opponent_difficulty) if hasattr(p, 'opponent_difficulty') and p.opponent_difficulty is not None else 3,
+            "form": float(p.form) if hasattr(p, 'form') and p.form is not None else 0.0,
+            "points_per_game": float(p.points_per_game) if hasattr(p, 'points_per_game') and p.points_per_game is not None else 0.0,
+            "created_at": p.created_at.isoformat() if hasattr(p, 'created_at') and p.created_at is not None else None
+        })
+    
+    return result
 
 @app.get("/predictions/latest")
 async def get_latest_predictions(limit: int = 50, db: Session = Depends(get_database)):
     """Get latest player predictions with player names"""
-    try:
-        predictions = db.query(PlayerPrediction).order_by(
-            PlayerPrediction.created_at.desc()
-        ).limit(limit).all()
-        
-        # Get player names for all unique player IDs
-        player_ids = []
-        for p in predictions:
-            player_id = int(p.player_id) if hasattr(p, 'player_id') else 0
-            if player_id not in player_ids:
-                player_ids.append(player_id)
-        
-        player_names = {}
-        for player_id in player_ids:
-            player_names[player_id] = await get_player_name(player_id)
-        
-        result = []
-        for p in predictions:
-            result.append({
-                "id": int(p.id) if hasattr(p, 'id') else 0,
-                "player_id": int(p.player_id) if hasattr(p, 'player_id') else 0,
-                "player_name": player_names.get(int(p.player_id) if hasattr(p, 'player_id') else 0, f'Player {p.player_id if hasattr(p, "player_id") else 0}'),
-                "gameweek": int(p.gameweek) if hasattr(p, 'gameweek') and p.gameweek is not None else 0,
-                "predicted_points": float(p.predicted_points) if hasattr(p, 'predicted_points') and p.predicted_points is not None else 0.0,
-                "confidence_interval": float(p.confidence_interval) if hasattr(p, 'confidence_interval') and p.confidence_interval is not None else 0.0,
-                "model_version": getattr(p, 'model_version', ''),
-                "created_at": p.created_at.isoformat() if hasattr(p, 'created_at') and p.created_at is not None else None
-            })
-        
-        return result
-    except Exception as e:
-        logger.error(f"Error fetching predictions: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to fetch predictions")
+    predictions = db.query(PlayerPrediction).order_by(
+        PlayerPrediction.created_at.desc()
+    ).limit(limit).all()
+    
+    # Get player names for all unique player IDs
+    player_ids = []
+    for p in predictions:
+        player_id = int(p.player_id) if hasattr(p, 'player_id') else 0
+        if player_id not in player_ids:
+            player_ids.append(player_id)
+    
+    player_names = {}
+    for player_id in player_ids:
+        player_names[player_id] = await get_player_name(player_id)
+    
+    result = []
+    for p in predictions:
+        result.append({
+            "id": int(p.id) if hasattr(p, 'id') else 0,
+            "player_id": int(p.player_id) if hasattr(p, 'player_id') else 0,
+            "player_name": player_names.get(int(p.player_id) if hasattr(p, 'player_id') else 0, f'Player {p.player_id if hasattr(p, "player_id") else 0}'),
+            "gameweek": int(p.gameweek) if hasattr(p, 'gameweek') and p.gameweek is not None else 0,
+            "predicted_points": float(p.predicted_points) if hasattr(p, 'predicted_points') and p.predicted_points is not None else 0.0,
+            "confidence_interval": float(p.confidence_interval) if hasattr(p, 'confidence_interval') and p.confidence_interval is not None else 0.0,
+            "model_version": getattr(p, 'model_version', ''),
+            "created_at": p.created_at.isoformat() if hasattr(p, 'created_at') and p.created_at is not None else None
+        })
+    
+    return result
 
 @app.get("/transfers/history")
 async def get_transfer_history(limit: int = 50, db: Session = Depends(get_database)):
     """Get transfer history with player names"""
-    try:
-        transfers = db.query(TransferHistory).order_by(
-            TransferHistory.timestamp.desc()
-        ).limit(limit).all()
-        
-        # Get player names for all unique player IDs
-        player_ids = []
-        for t in transfers:
-            player_out_id = int(t.player_out_id) if hasattr(t, 'player_out_id') else 0
-            player_in_id = int(t.player_in_id) if hasattr(t, 'player_in_id') else 0
-            if player_out_id not in player_ids:
-                player_ids.append(player_out_id)
-            if player_in_id not in player_ids:
-                player_ids.append(player_in_id)
-        
-        player_names = {}
-        for player_id in player_ids:
-            player_names[player_id] = await get_player_name(player_id)
-        
-        result = []
-        for t in transfers:
-            result.append({
-                "id": int(t.id) if hasattr(t, 'id') else 0,
-                "player_out_id": int(t.player_out_id) if hasattr(t, 'player_out_id') else 0,
-                "player_out_name": player_names.get(int(t.player_out_id) if hasattr(t, 'player_out_id') else 0, f'Player {t.player_out_id if hasattr(t, "player_out_id") else 0}'),
-                "player_in_id": int(t.player_in_id) if hasattr(t, 'player_in_id') else 0,
-                "player_in_name": player_names.get(int(t.player_in_id) if hasattr(t, 'player_in_id') else 0, f'Player {t.player_in_id if hasattr(t, "player_in_id") else 0}'),
-                "gameweek": int(t.gameweek) if hasattr(t, 'gameweek') and t.gameweek is not None else 0,
-                "transfer_gain": float(t.transfer_gain) if hasattr(t, 'transfer_gain') and t.transfer_gain is not None else 0.0,
-                "cost": int(t.cost) if hasattr(t, 'cost') and t.cost is not None else 0,
-                "timestamp": t.timestamp.isoformat() if hasattr(t, 'timestamp') and t.timestamp is not None else None
-            })
-        
-        return result
-    except Exception as e:
-        logger.error(f"Error fetching transfer history: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to fetch transfer history")
+    transfers = db.query(TransferHistory).order_by(
+        TransferHistory.timestamp.desc()
+    ).limit(limit).all()
+    
+    # Get player names for all unique player IDs
+    player_ids = []
+    for t in transfers:
+        player_out_id = int(t.player_out_id) if hasattr(t, 'player_out_id') else 0
+        player_in_id = int(t.player_in_id) if hasattr(t, 'player_in_id') else 0
+        if player_out_id not in player_ids:
+            player_ids.append(player_out_id)
+        if player_in_id not in player_ids:
+            player_ids.append(player_in_id)
+    
+    player_names = {}
+    for player_id in player_ids:
+        player_names[player_id] = await get_player_name(player_id)
+    
+    result = []
+    for t in transfers:
+        result.append({
+            "id": int(t.id) if hasattr(t, 'id') else 0,
+            "player_out_id": int(t.player_out_id) if hasattr(t, 'player_out_id') else 0,
+            "player_out_name": player_names.get(int(t.player_out_id) if hasattr(t, 'player_out_id') else 0, f'Player {t.player_out_id if hasattr(t, "player_out_id") else 0}'),
+            "player_in_id": int(t.player_in_id) if hasattr(t, 'player_in_id') else 0,
+            "player_in_name": player_names.get(int(t.player_in_id) if hasattr(t, 'player_in_id') else 0, f'Player {t.player_in_id if hasattr(t, "player_in_id") else 0}'),
+            "gameweek": int(t.gameweek) if hasattr(t, 'gameweek') and t.gameweek is not None else 0,
+            "transfer_gain": float(t.transfer_gain) if hasattr(t, 'transfer_gain') and t.transfer_gain is not None else 0.0,
+            "cost": int(t.cost) if hasattr(t, 'cost') and t.cost is not None else 0,
+            "timestamp": t.timestamp.isoformat() if hasattr(t, 'timestamp') and t.timestamp is not None else None
+        })
+    
+    return result
 
 @app.get("/analytics/summary")
 async def get_analytics_summary(db: Session = Depends(get_database)):
     """Get analytics summary"""
+    # Get total predictions
+    total_predictions = db.query(PlayerPrediction).count()
+    
+    # Get total performances
+    total_performances = db.query(PlayerPerformance).count()
+    
+    # Get total transfers
+    total_transfers = db.query(TransferHistory).count()
+    
+    # Get latest gameweek
+    latest_performance = db.query(PlayerPerformance).order_by(
+        PlayerPerformance.gameweek.desc()
+    ).first()
+    
+    latest_gameweek = latest_performance.gameweek if latest_performance else 0
+    
+    return {
+        "total_predictions": total_predictions,
+        "total_performances": total_performances,
+        "total_transfers": total_transfers,
+        "latest_gameweek": latest_gameweek
+    }
+
+from fastapi import BackgroundTasks
+import sys
+
+# Add parent directory to path to allow importing bot
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from bot import run_weekly_process
+
+@app.post("/system/run")
+async def run_bot_manually(background_tasks: BackgroundTasks):
+    """Trigger the bot process manually"""
+    background_tasks.add_task(run_weekly_process)
+    return {"message": "Bot process started in background"}
+
+@app.get("/system/logs")
+async def get_system_logs(lines: int = 100):
+    """Get recent system logs"""
+    log_file = "logs/fpl_bot.log"
+    if not os.path.exists(log_file):
+        return {"logs": []}
+    
     try:
-        # Get total predictions
-        total_predictions = db.query(PlayerPrediction).count()
-        
-        # Get total performances
-        total_performances = db.query(PlayerPerformance).count()
-        
-        # Get total transfers
-        total_transfers = db.query(TransferHistory).count()
-        
-        # Get latest gameweek
-        latest_performance = db.query(PlayerPerformance).order_by(
-            PlayerPerformance.gameweek.desc()
-        ).first()
-        
-        latest_gameweek = latest_performance.gameweek if latest_performance else 0
-        
-        return {
-            "total_predictions": total_predictions,
-            "total_performances": total_performances,
-            "total_transfers": total_transfers,
-            "latest_gameweek": latest_gameweek
-        }
+        with open(log_file, "r") as f:
+            # Simple tail implementation
+            all_lines = f.readlines()
+            return {"logs": all_lines[-lines:]}
     except Exception as e:
-        logger.error(f"Error fetching analytics summary: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to fetch analytics summary")
+        logger.error(f"Error reading logs: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to read logs")
+
+@app.get("/ml/feature-importance")
+async def get_feature_importance():
+    """Get ML model feature importance"""
+    if not ml_predictor.is_trained:
+        raise HTTPException(status_code=404, detail="Model not trained yet")
+    
+    importance = ml_predictor.get_feature_importance()
+    return importance
 
 if __name__ == "__main__":
     import uvicorn
